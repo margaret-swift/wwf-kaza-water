@@ -21,6 +21,8 @@ As in 2022, I'll break up the year into six time periods: Each month of June, Ju
 ## 4.	Creating maximum wetness water mask
 We want to track waterhole size over time, so creating a binary mask of waterhole-notwaterhole will be important. First, I will pull Sentinel-2 images from February - May of each year, add AWEI, and create a median image for each year. Using the threshold generated in step 3, I will then threshold each within-year median image, then sum those images across years. This summed image will have values from 0 to N where N is the number of years. After all of this processing, I will save (1) the summed image for future reference as a measure of water frequency, and (2) a binary layer where every value > 0 is labeled as potentially filled with water.
 
+>>> TODO: Find the best water-defining algorithm.
+
 ## 5. Mapping water across years and regions
 Finally, for each region _R_, time period _P_, and year _Y_ I will create median AWEI images, mask these images using the binary mask in step 4, and threshold using the period-specific Otsu threshold developed in step 3. 
 
