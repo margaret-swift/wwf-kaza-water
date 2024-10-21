@@ -26,6 +26,10 @@ We want to track waterhole size over time, so creating a binary mask of waterhol
 ## 5. Mapping water across years and regions
 Finally, for each region _R_, time period _P_, and year _Y_ I will create median AWEI images, mask these images using the binary mask in step 4, and threshold using the period-specific Otsu threshold developed in step 3. 
 
+## 6. Testing and validation
+Once I have all the maps from part 5, I can start validating how well this process works against real data (validation dataset created from Planet or some other high-resolution source). Statistics will include:
+1. Commission error rate.
+2. Omission error rate.
 
 
         
