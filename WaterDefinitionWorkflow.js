@@ -1,8 +1,12 @@
 /**~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * 
- * WaterDefinitionWorkflow 
+ * WaterDefinitionWorkflow.js
  * Created: 05 August 2025
- * Author: Margaret Swift <mes473@cornell.edu>
+ * Author:  Margaret Swift 
+ * Contact: <mes473@cornell.edu> 
+ * Website: www.maggie.earth
+ * GITHub:  https://github.com/margaret-swift/wwf-kaza-water/blob/main/WaterDefinitionWorkflow.js
  * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * ~ * 
+ * 
  * This code uses Otsu thresholding on median AWEI values, calculated from Sentinel-2
  *    MSI imagery, to generate a binary "isWater" raster where: 
  *      1 = water
@@ -13,9 +17,11 @@
  * The data are exported to a Google Drive folder. This code was originally written to interact
  *    with the Google Cloud Storage platform.  If you have questions about batch execution for 
  *    multiple AOI (I ran mine over the WWF Hydrosheds database), email me at <mes473@cornell.edu>
+ * 
+ * MAIN CODE STARTS ~ LINE 120
  */
-
-
+ 
+ 
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 //                                    !!! LOADING DATA FILES !!!
@@ -48,13 +54,65 @@ var wsf = ee.Image('DLR/WSF/WSF2015/v1').unmask()
 // you can download from here: https://www.openstreetmap.org/#map=5/38.01/-95.84
 // IF YOU USE ROAD MASKING: You need to make sure you're zoomed in quite far so that the painting mask 
 //   doesn't get too large (it's pixel-based)
-// var rds = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/primary_trunk_rds_5countries');
-// var rds_ang = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/angola_roads');
-// var rds_bot = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/botswana_roads');
-// var rds_nam = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/namibia_roads');
-// var rds_zam = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/zambia_roads');
-// var rds_zim = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/zimbabwe_roads');
-// var roads = rds.merge(rds_ang).merge(rds_bot).merge(rds_zim).merge(rds_nam).merge(rds_zam)
+// var roads = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/primary_trunk_rds_5countries');
+
+
+
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+//                               !!! USER DEFINED PARAMETERS !!!
+// -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+//..........................................................................
+// USER-DEFINED AOI AND WINDOW-CENTER POINT
+var aoi = ee.Geometry.Polygon(
+            [[[23.362973058178042, -18.457400995456705],
+              [23.362973058178042, -18.646180731915678],
+              [23.621838414623355, -18.646180731915678],
+              [23.621838414623355, -18.457400995456705]]], null, false);
+var poi = ee.Geometry.Point([23.497416585821693, -18.537746016891045]);
+
+
+//..........................................................................
+// EXPORT FILES?
+//..........................................................................
+
+// yes/no
+var doExport = false;
+
+// BATCH EXPORT OVER WWF HYDROSHEDS, YES OR NO?
+var runBatches = false;
+
+// SINGLE AOI EXPORT PARAMETERS
+var xname = "waterhole_fill_AOI"
+
+// BATCH EXPORT PARAMETERS
+// var listSize = 25
+// var hydro = ee.FeatureCollection("WWF/HydroSHEDS/v1/Basins/hybas_8");
+// var batch_aoi = hydro.filterBounds(aoi)
+// var id_name = "HYBAS_ID"
+// var bname = "kaza_waterhole_rasters" // GCS bucket name
+// var xname_slug = 'maxfill_h8' // export URI prefix
+
+
+//..........................................................................
+// USER-DEFINED WET SEASON
+//..........................................................................
+
+// We want to define maximum water fill at the wettest time of the wettest years.
+// this will differ by location, so we let the user define the wet season. 
+// I count backward from the end of the wet season, since wet seasons in KAZA
+// span the previous November and December. You can change this code to fit
+// the climate of your region of interest.
+
+var wet_end = '-05-01' // end of wet season
+var wet_length = -5 // number of months to go back from end of wet season
+function defineWetSeason (y) {
+  var d2 = ee.Date(ee.String(ee.Number(y)).cat(wet_end));
+  var d1 = d2.advance(wet_length, 'month');
+  return(ee.Dictionary({'d1':d1, 'd2':d2}));
+}
 
 
 
@@ -64,26 +122,12 @@ var wsf = ee.Image('DLR/WSF/WSF2015/v1').unmask()
 // -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-// USER-DEFINED AOI AND WINDOW-CENTER POINT
-var aoi = ee.Geometry.Polygon(
-            [[[23.362973058178042, -18.457400995456705],
-              [23.362973058178042, -18.646180731915678],
-              [23.621838414623355, -18.646180731915678],
-              [23.621838414623355, -18.457400995456705]]], null, false);
-var poi = ee.Geometry.Point([23.497416585821693, -18.537746016891045]);
-
-// USER-DEFINED WET SEASON
-var wet_end = '-05-01' // end of wet season
-var wet_length = -5 // number of months to go back from end of wet season
-
-function defineWetSeason (y) {
-  var d2 = ee.Date(ee.String(ee.Number(y)).cat(wet_end));
-  var d1 = d2.advance(wet_length, 'month'); // avoids needing to hardcode year change
-  return(ee.Dictionary({'d1':d1, 'd2':d2}));
-}
+//..........................................................................
+// PLOTTING
+//..........................................................................
 
 // SET UP MAP OPTIONS
-// Map needs to be zoomed in for proper road masking and pixel-based histogram generation
+// Map needs to be zoomed in for proper road masking and pixel-based calcs
 Map.centerObject(poi, 17) 
 Map.setOptions('SATELLITE');
 var aweiVis = {"bands":["AWEIsh_median"],"min":-0.74,"max":0.014};
@@ -98,13 +142,17 @@ var dates_19 = defineWetSeason(2019)
 var s2_19 = s2Prep(dates_19, aoi).select("AWEIsh_median");
 Map.addLayer(s2_19, aweiVis, "AWEIsh dry year - 2019", false)
 
+//..........................................................................
 // CREATE MAXIMUM WATER FILL DATASET
+//..........................................................................
 var water_max = createMaxPotentialFill(aoi);
 Map.addLayer(water_max, {'palette':'yellow'}, "Maximum Water Fill")
 
+
+//..........................................................................
 // AN EXAMPLE IN DRY YEAR FOR COMPARISON TO MAX WATER FILL
-// If you run Otsu in debug mode, you get histogram in the console
-var debug = true;
+//..........................................................................
+var debug = true; // If you run Otsu in debug mode, you get a histogram in the console
 var ot = computeThresholdUsingOtsu(s2_19, aoi, debug)
 var water_19 = s2_19.where(s2_19.lt(ot), 0).where(s2_19.gte(ot), 1).selfMask()
 Map.addLayer(water_19, {'palette':'red'}, "Dry year (2019) water fill")
@@ -112,17 +160,56 @@ Map.addLayer(water_19, {'palette':'red'}, "Dry year (2019) water fill")
 // we can zoom back out now
 Map.centerObject(poi, 14) 
 
-// EXPORT IT!
-// var xname = "waterhole_fill_example"
-// Export.image.toDrive({
-//   image: water_max,
-//   description: xname,
-//   region: aoi,
-//   scale: 10,
-//   maxPixels: 10000000000000
-// }); 
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+//                                        !!! EXPORT !!!
+// -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+//..........................................................................
+// SINGLE AOI EXPORT
+//..........................................................................
+if (!runBatches & doExport) {
+  Export.image.toDrive({
+    image: water_max,
+    description: xname,
+    region: aoi,
+    scale: 10,
+    maxPixels: 10000000000000
+  }); 
 
+//..........................................................................
+// BATCH EXPORT INTO BUCKETS
+//..........................................................................
+/* 
+ * GOOGLE CLI CODE TO MOVE FILES: 
+ *    gcloud storage mv gs://kaza_waterhole_rasters/SLUG* gs://kaza_waterhole_rasters/TO_FOLDER/
+ * 
+ * BATCH TASK EXECUTION - STEPS
+ *    https://benny.istan.to/blog/20220319-batch-task-execution-in-google-earth-engine-code-editor
+
+ * PASTE INTO DEVELOPER CONSOLE
+      function runTaskList(){
+        // var tasklist = document.getElementsByClassName('task local type-EXPORT_IMAGE awaiting-user-config');
+        // for (var i = 0; i < tasklist.length; i++)
+        //         tasklist[i].getElementsByClassName('run-button')[0].click();
+        $$('.run-button' ,$$('ee-task-pane')[0].shadowRoot).forEach(function(e) {
+             e.click();
+        })
+      }
+      runTaskList();
+*/
+} else if (runBatches & doExport) {
+  
+  // get list of IDS
+  var all_ids = batch_aoi.aggregate_array(id_name).sort()
+  var ids_list = ee.List.sequence(0, all_ids.size(), listsize);
+  
+  //  BATCH TASK EXECUTION
+  // batchExport(1) // 
+  // batchExport(2) // 
+  // ... for as many as you have.
+}
 
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
@@ -281,9 +368,7 @@ function panSharpen(params) {
     .select(image.bandNames());
 }  
 function addIndex(img, exp, dict, bname) {
-  /* 
-    Add an index band to an existing image.
-  */
+  /*  Add an index band to an existing image. */
   var inx = img.expression(exp, dict).rename(bname).select(bname);
   return img.addBands(inx);
 }
@@ -293,8 +378,8 @@ function addAWEIsh(img){
     https://www.sciencedirect.com/science/article/abs/pii/S0034425713002873
   */
   // SPEED BOOKMARK: Ignore pan-sharpening for Otsu thresholding to improve memory capacity
-  var sharp = img.divide(10000) // 40sec
-  // var sharp = panSharpen({image: img}).divide(10000); // 2m
+  // var sharp = img.divide(10000) // 40sec
+  var sharp = panSharpen({image: img}).divide(10000); // 2m
   var AWEIsh = sharp.expression(
     'B2 + (2.5 * B3) - (1.5 * (B8 + B11)) - (0.25 * B12)', {
       'B2': sharp.select('B2'),
@@ -593,6 +678,36 @@ function createMaxPotentialFill (bounds) {
   var water_sum = ee.ImageCollection.fromImages([ water_msc, rec ]).sum();
   var all_water = water_sum.where(water_sum.gt(0), 1).select('isWater');
   return(all_water);
+}
+
+//..........................................................................
+//   BATCH EXPORT FUNCTIONS
+//..........................................................................
+function exportFunc(id, slug) {
+  var aoi_id = aoi.filter(ee.Filter.eq(id_name, id));
+  var waterholes = createMaxPotentialFill(aoi_id);
+  var xname = slug + id;
+  Export.image.toCloudStorage({
+    image: waterholes,
+    description: xname,
+    bucket: bname,
+    region: aoi_id,
+    scale: 10,
+    maxPixels: 10000000000000
+  }); 
+}
+var batchExport = function(inx) {
+  var inx_lo = ids_list.get(inx-1)
+  var inx_hi = ids_list.get(inx)
+  var bth_lo = all_ids.get(inx_lo)
+  var bth_hi = all_ids.get(inx_hi) 
+  var batch_ids = aoi
+    .filter(ee.Filter.gt(id_name, bth_lo))
+    .filter(ee.Filter.lte(id_name, bth_hi))
+    .aggregate_array(id_name)
+  batch_ids.evaluate(function (ids) {
+    ids.map(function (id) exportFunc(id, xname_slug) )
+  });
 }
 
 
