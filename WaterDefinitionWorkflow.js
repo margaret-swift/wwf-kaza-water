@@ -57,7 +57,6 @@ var wsf = ee.Image('DLR/WSF/WSF2015/v1').unmask()
 // var roads = ee.FeatureCollection('projects/kaza-waterhole-mapping/assets/osm-files/primary_trunk_rds_5countries');
 
 
-
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 //                               !!! USER DEFINED PARAMETERS !!!
@@ -115,7 +114,6 @@ function defineWetSeason (y) {
 }
 
 
-
 // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 // -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
 //                               !!! MAIN CODE EXPLORATION !!!
@@ -148,7 +146,6 @@ Map.addLayer(s2_19, aweiVis, "AWEIsh dry year - 2019", false)
 var water_max = createMaxPotentialFill(aoi);
 Map.addLayer(water_max, {'palette':'yellow'}, "Maximum Water Fill")
 
-
 //..........................................................................
 // AN EXAMPLE IN DRY YEAR FOR COMPARISON TO MAX WATER FILL
 //..........................................................................
@@ -156,7 +153,6 @@ var debug = true; // If you run Otsu in debug mode, you get a histogram in the c
 var ot = computeThresholdUsingOtsu(s2_19, aoi, debug)
 var water_19 = s2_19.where(s2_19.lt(ot), 0).where(s2_19.gte(ot), 1).selfMask()
 Map.addLayer(water_19, {'palette':'red'}, "Dry year (2019) water fill")
-
 // we can zoom back out now
 Map.centerObject(poi, 14) 
 
@@ -684,19 +680,19 @@ function createMaxPotentialFill (bounds) {
 //   BATCH EXPORT FUNCTIONS
 //..........................................................................
 function exportFunc(id, slug) {
-  var aoi_id = aoi.filter(ee.Filter.eq(id_name, id));
-  var waterholes = createMaxPotentialFill(aoi_id);
+  var aoi_i = aoi.filter(ee.Filter.eq(id_name, id));
+  var waterholes = createMaxPotentialFill(aoi_i);
   var xname = slug + id;
   Export.image.toCloudStorage({
     image: waterholes,
     description: xname,
     bucket: bname,
-    region: aoi_id,
+    region: aoi_i,
     scale: 10,
     maxPixels: 10000000000000
   }); 
 }
-var batchExport = function(inx) {
+function batchExport (inx) {
   var inx_lo = ids_list.get(inx-1)
   var inx_hi = ids_list.get(inx)
   var bth_lo = all_ids.get(inx_lo)
@@ -706,7 +702,7 @@ var batchExport = function(inx) {
     .filter(ee.Filter.lte(id_name, bth_hi))
     .aggregate_array(id_name)
   batch_ids.evaluate(function (ids) {
-    ids.map(function (id) exportFunc(id, xname_slug) )
+    ids.map(function (id) { exportFunc(id, xname_slug) })
   });
 }
 
