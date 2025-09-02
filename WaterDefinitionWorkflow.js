@@ -18,7 +18,6 @@
  *    with the Google Cloud Storage platform.  If you have questions about batch execution for 
  *    multiple AOI (I ran mine over the WWF Hydrosheds database), email me at <mes473@cornell.edu>
  * 
- * MAIN CODE STARTS ~ LINE 120
  */
  
  
@@ -71,7 +70,6 @@ var aoi = ee.Geometry.Polygon(
               [23.621838414623355, -18.646180731915678],
               [23.621838414623355, -18.457400995456705]]], null, false);
 var poi = ee.Geometry.Point([23.497416585821693, -18.537746016891045]);
-
 
 //..........................................................................
 // EXPORT FILES?
@@ -128,16 +126,16 @@ function defineWetSeason (y) {
 // Map needs to be zoomed in for proper road masking and pixel-based calcs
 Map.centerObject(poi, 17) 
 Map.setOptions('SATELLITE');
-var aweiVis = {"bands":["AWEIsh_median"],"min":-0.74,"max":0.014};
+var aweiVis = {"bands":["AWEIsh"],"min":-0.74,"max":0.014};
 
 // PLOTTING AWEI
 // a wet year - 2022
 var dates_22 = defineWetSeason(2022)
-var s2_22 = s2Prep(dates_22, aoi).select("AWEIsh_median");
+var s2_22 = s2Prep(dates_22, aoi).select("AWEIsh");
 Map.addLayer(s2_22, aweiVis, "AWEIsh wet year - 2022")
 // a dry year - 2019
 var dates_19 = defineWetSeason(2019)
-var s2_19 = s2Prep(dates_19, aoi).select("AWEIsh_median");
+var s2_19 = s2Prep(dates_19, aoi).select("AWEIsh");
 Map.addLayer(s2_19, aweiVis, "AWEIsh dry year - 2019", false)
 
 //..........................................................................
@@ -396,14 +394,15 @@ function s2Prep (dates, bounds) {
       and taking median */
   var d1 = dates.get('d1'); 
   var d2 = dates.get('d2');
-  var s2_masked = s2Cloudless(d1, d2, bounds) 
-    .map(addAWEIsh)       // add critical AWEI band
-    .map(maskBurns)       // dynamic
-    // .map(maskRoads)       // static
+  var s2_sr_cld_col = get_s2_sr_cld_col(bounds, d1, d2)
+    .map(addAWEIsh)
+    .map(maskBurns)
     .map(maskSettlements) // static
     .map(maskBuildings)   // static
-  var s2_median = ee.Image(s2_masked.reduce(ee.Reducer.median()));
-  return(s2_median);
+  var s2_sr_median = (s2_sr_cld_col.map(add_cld_shdw_mask)
+                             .map(apply_cld_shdw_mask)
+                             .median());
+  return(s2_sr_median);
 }
 function s2Cloudless (d1, d2, bounds) {
   /* 
@@ -503,6 +502,93 @@ function maskBuildings (image) {
     .where(buildMaskBuffer.eq(1), 0).where(buildMaskBuffer.eq(0), 1)
   return(image.updateMask(buildMaskReverseBuffer));
 }
+
+//..........................................................................
+//   CLOUD MASKING
+//..........................................................................
+
+// DEALING WITH CLOUDS
+// https://gis.stackexchange.com/questions/395286/displaying-the-cloud-free-composite-of-sentinel2-using-s2cloudless-in-gee
+// https://code.earthengine.google.com/d9aaa276f0fa1ab33e78230e8f348c6f
+function get_s2_sr_cld_col (aoi, start_date, end_date) {
+  var CLOUD_FILTER = 10;
+  
+  // # Import and filter S2 SR.
+  var s2_sr_col = (ee.ImageCollection('COPERNICUS/S2_SR')
+    .filterBounds(aoi)
+    .filterDate(start_date, end_date)
+    .filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', CLOUD_FILTER)))
+
+  // # Import and filter s2cloudless.
+  var s2_cloudless_col = (ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY')
+    .filterBounds(aoi)
+    .filterDate(start_date, end_date))
+  
+  // # Join the filtered s2cloudless collection to the SR collection by the 'system:index' property.
+  var joined = ee.ImageCollection(ee.Join.saveFirst('s2cloudless').apply({
+    'primary': s2_sr_col,
+    'secondary': s2_cloudless_col,
+    'condition': ee.Filter.equals({
+        'leftField': 'system:index',
+        'rightField': 'system:index'
+    })
+  }))
+  return (joined)
+}
+function add_cloud_bands (img) {
+  var CLD_PRB_THRESH = 30;
+  // # Get s2cloudless image, subset the probability band.
+  var cld_prb = ee.Image(img.get('s2cloudless')).select('probability')
+  // # Condition s2cloudless by the probability threshold value.
+  var is_cloud = cld_prb.gt(CLD_PRB_THRESH).rename('clouds')
+  // # Add the cloud probability layer and cloud mask as image bands.
+  return img.addBands(ee.Image([cld_prb, is_cloud]))
+}
+function add_shadow_bands (img) {
+  var NIR_DRK_THRESH = 0.15
+  var CLD_PRJ_DIST = 1
+  // # Identify water pixels from the SCL band.
+  var not_water = img.select('SCL').neq(6)
+  // # Identify dark NIR pixels that are not water (potential cloud shadow pixels).
+  var SR_BAND_SCALE = 1e4
+  var dark_pixels = img.select('B8').lt(NIR_DRK_THRESH*SR_BAND_SCALE).multiply(not_water).rename('dark_pixels')
+  // # Determine the direction to project cloud shadow from clouds (assumes UTM projection).
+  var shadow_azimuth = ee.Number(90).subtract(ee.Number(img.get('MEAN_SOLAR_AZIMUTH_ANGLE')));
+  // # Project shadows from clouds for the distance specified by the CLD_PRJ_DIST input.
+  var cld_proj = (img.select('clouds').directionalDistanceTransform(shadow_azimuth, CLD_PRJ_DIST*10)
+      .reproject({'crs': img.select(0).projection(), 'scale': 100})
+      .select('distance')
+      .mask()
+      .rename('cloud_transform'))
+  // # Identify the intersection of dark pixels with cloud shadow projection.
+  var shadows = cld_proj.multiply(dark_pixels).rename('shadows')
+  // # Add dark pixels, cloud projection, and identified shadows as image bands.
+  return img.addBands(ee.Image([dark_pixels, cld_proj, shadows]))
+}
+function add_cld_shdw_mask(img) {
+  var BUFFER = 50
+  
+  // # Add cloud component bands.
+  var img_cloud = add_cloud_bands(img)
+  // # Add cloud shadow component bands.
+  var img_cloud_shadow = add_shadow_bands(img_cloud)
+  // # Combine cloud and shadow mask, set cloud and shadow as value 1, else 0.
+  var is_cld_shdw = img_cloud_shadow.select('clouds').add(img_cloud_shadow.select('shadows')).gt(0)
+  // # Remove small cloud-shadow patches and dilate remaining pixels by BUFFER input.
+  // # 20 m scale is for speed, and assumes clouds don't require 10 m precision.
+  is_cld_shdw = (is_cld_shdw.focal_min(2).focal_max(BUFFER*2/20)
+      .reproject({'crs': img.select([0]).projection(), 'scale': 20})
+      .rename('cloudmask'))
+  // # Add the final cloud-shadow mask to the image.
+  return img_cloud_shadow.addBands(is_cld_shdw);
+}
+function apply_cld_shdw_mask(img) {
+    // # Subset the cloudmask band and invert it so clouds/shadow are 0, else 1.
+    var not_cld_shdw = img.select('cloudmask').not();
+    // # Subset reflectance bands and update their masks, return the result.
+    return img.select('B.*', 'AWEIsh').updateMask(not_cld_shdw);
+}
+
 
 //..........................................................................
 //   SORTING YEARS BY REGIONAL MEAN ANNUAL RAINFALL
@@ -630,7 +716,7 @@ function createWaterholesbyYear (bounds, y) {
   
   // Get median s2 image over these dates and the bounds
   var dates_dict = defineWetSeason(y)
-  var s2_median = s2Prep(dates_dict, bounds).select("AWEIsh_median");
+  var s2_median = s2Prep(dates_dict, bounds).select("AWEIsh");
   print(ee.String(y).cat(" wet season dates: "), dates_dict)
   
   // Calculate Otsu threshold. This can take a while.
